@@ -1,0 +1,13 @@
+[project]
+name = "hdfs-drive"
+version = "0.1.0"
+description = "Безопасный веб-интерфейс для файлов HDFS"
+requires-python = ">=3.10"
+dependencies = [
+  "streamlit>=1.64,<2",
+  "ipython>=8,<10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

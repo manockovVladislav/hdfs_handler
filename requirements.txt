@@ -1,0 +1,2 @@
+streamlit>=1.64,<2
+ipython>=8,<10
