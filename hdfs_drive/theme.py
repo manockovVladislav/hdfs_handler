@@ -75,18 +75,11 @@ def apply_theme(dark: bool) -> None:
             background: conic-gradient(from 30deg, #34a853 0 25%, #4285f4 0 50%, #ea4335 0 75%, #fbbc04 0);
             box-shadow: inset 0 0 0 7px {colors['sidebar']};
         }}
-        .drive-nav {{ margin: .35rem 0 1rem; }}
-        .drive-nav-item {{
-            display: flex; align-items: center; min-height: 36px;
-            padding: 0 .85rem; border-radius: 18px;
-            color: {colors['text']}; font-size: .9rem;
-        }}
-        .drive-nav-item:hover {{ background: {colors['hover']}; }}
         .storage-status {{
             display: flex; justify-content: flex-end; align-items: center;
             min-height: 48px; color: {colors['muted']}; font-size: .8rem;
         }}
-        .demo-pill {{
+        .test-pill {{
             display: inline-block; padding: .2rem .55rem; border-radius: 999px;
             background: #e6f4ea; color: #137333; font-size: .76rem; font-weight: 600;
         }}
@@ -147,17 +140,28 @@ def apply_theme(dark: bool) -> None:
             border-color: {danger} !important;
             color: {danger_text} !important;
         }}
-        .stButton > button[kind="tertiary"] {{
+        .stButton > button[kind="tertiary"],
+        button[data-testid="stBaseButton-tertiary"] {{
             background: transparent !important;
             border-color: transparent !important;
             box-shadow: none !important;
             justify-content: flex-start !important;
+            text-align: left !important;
             padding-left: .35rem !important;
             color: {colors['text']} !important;
         }}
-        .stButton > button[kind="tertiary"]:hover {{
+        .stButton > button[kind="tertiary"]:hover,
+        button[data-testid="stBaseButton-tertiary"]:hover {{
             background: {colors['hover']} !important;
             border-color: transparent !important;
+        }}
+        button[data-testid="stBaseButton-tertiary"] p {{
+            width: 100%; text-align: left !important;
+        }}
+        button[data-testid="stBaseButton-tertiary"] > div,
+        button[data-testid="stBaseButton-tertiary"] > div > span {{
+            justify-content: flex-start !important;
+            text-align: left !important;
         }}
         [data-testid="stSidebar"] .stButton > button,
         [data-testid="stSidebar"] [data-testid="stPopover"] > button {{

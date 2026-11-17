@@ -6,20 +6,21 @@ import html
 import json
 import mimetypes
 import posixpath
+import uuid
 
 import streamlit as st
 
 from .config import AppConfig
 from .models import FileEntry
-from .storage import DemoStorage, DriveStorage, HdfsStorage
+from .storage import DriveStorage, HdfsStorage, TestStorage
 from .theme import apply_theme
 from .utils import ensure_within_root, file_icon, format_size
 
 
 @st.cache_resource
 def _build_storage(config: AppConfig) -> DriveStorage:
-    if config.demo_mode:
-        return DemoStorage(root=config.root)
+    if config.test_mode:
+        return TestStorage(root=config.root)
     return HdfsStorage(config)
 
 
@@ -31,6 +32,7 @@ def _initialize_state(root: str) -> None:
         "download_data": None,
         "download_name": None,
         "download_mime": "application/octet-stream",
+        "download_token": None,
         "flash": None,
         "view_mode": "Список",
         "kind_filter": "Все объекты",
@@ -144,23 +146,14 @@ def _render_sidebar(storage: DriveStorage, config: AppConfig) -> None:
             on_click=_navigate_to,
             args=(storage.root,),
         )
-        st.markdown(
-            """
-            <div class="drive-nav">
-              <div class="drive-nav-item">⌂&nbsp;&nbsp;Главная</div>
-              <div class="drive-nav-item">◷&nbsp;&nbsp;Недавние</div>
-              <div class="drive-nav-item">☆&nbsp;&nbsp;Помеченные</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.write("")
         st.caption("ХРАНИЛИЩЕ")
         st.caption("Доступно только в пределах корневой папки")
         st.caption(f"Стартовый каталог: {config.root}")
         st.divider()
         _render_theme_selector()
-        if config.demo_mode:
-            st.markdown('<span class="demo-pill">ДЕМО-РЕЖИМ</span>', unsafe_allow_html=True)
+        if config.test_mode:
+            st.markdown('<span class="test-pill">ТЕСТОВЫЙ РЕЖИМ</span>', unsafe_allow_html=True)
             st.caption("Реальный HDFS не используется")
         else:
             st.caption("Подключение: HDFS")
@@ -199,23 +192,56 @@ def _render_breadcrumbs(root: str, current_path: str) -> None:
 def _render_download() -> None:
     if st.session_state.download_data is None:
         return
-    with st.container(border=True):
-        name_col, button_col, close_col = st.columns([5, 2, 0.5])
-        name_col.markdown(f"📥 **{st.session_state.download_name}** готов к скачиванию")
-        button_col.download_button(
-            "Скачать",
+    token = st.session_state.download_token
+    container_key = f"automatic_download_{token}"
+    st.html(f"<style>.st-key-{container_key} {{ display: none !important; }}</style>")
+    with st.container(key=container_key):
+        st.download_button(
+            "Автоматическое скачивание",
             data=st.session_state.download_data,
             file_name=st.session_state.download_name,
             mime=st.session_state.download_mime,
-            use_container_width=True,
+            key=f"download_payload_{token}",
+            on_click="ignore",
         )
-        if close_col.button("×", key="close_download"):
-            st.session_state.download_data = None
-            st.session_state.download_name = None
-            st.rerun()
+    # Streamlit требует download_button для безопасной выдачи файла.
+    # Кнопка скрыта и нажимается один раз после подготовки файла.
+    st.html(
+        f"""
+        <script>
+        (() => {{
+          const storageKey = {json.dumps(f"hdfs-drive-download-{token}")};
+          if (window.sessionStorage.getItem(storageKey)) return;
+          let attempts = 0;
+          const startDownload = () => {{
+            const button = document.querySelector('.st-key-{container_key} button');
+            if (!button && attempts++ < 50) {{
+              window.setTimeout(startDownload, 100);
+              return;
+            }}
+            if (!button) return;
+            window.sessionStorage.setItem(storageKey, '1');
+            button.click();
+          }};
+          startDownload();
+        }})();
+        </script>
+        """,
+        unsafe_allow_javascript=True,
+    )
 
 
-def _render_delete_confirmation(storage: DriveStorage) -> None:
+def _clear_pending_delete() -> None:
+    st.session_state.pending_delete = None
+
+
+@st.dialog(
+    "Удаление файла",
+    width="small",
+    dismissible=True,
+    on_dismiss=_clear_pending_delete,
+)
+def _render_delete_dialog(storage: DriveStorage) -> None:
     pending: FileEntry | None = st.session_state.pending_delete
     if pending is None:
         return
@@ -223,23 +249,30 @@ def _render_delete_confirmation(storage: DriveStorage) -> None:
         st.session_state.pending_delete = None
         st.error("Удаление каталогов запрещено")
         return
-    with st.container(border=True):
-        text_col, confirm_col, cancel_col = st.columns([5, 1.5, 1])
-        text_col.warning(
-            f"Удалить файл «{pending.name}»? Это действие нельзя будет отменить."
-        )
-        if confirm_col.button(
-            "Удалить файл", type="primary", use_container_width=True, key="confirm_delete"
-        ):
-            try:
-                storage.delete_file(pending, confirmed=True)
-                st.session_state.pending_delete = None
-                _flash("Файл удалён")
-            except Exception as error:
-                st.error(f"Ошибка удаления: {error}")
-        if cancel_col.button("Отмена", use_container_width=True, key="cancel_delete"):
-            st.session_state.pending_delete = None
-            st.rerun()
+    st.warning(
+        f"Удалить файл «{pending.name}»? Это действие нельзя будет отменить."
+    )
+    cancel_col, confirm_col = st.columns(2)
+    if cancel_col.button("Отмена", use_container_width=True, key="cancel_delete"):
+        _clear_pending_delete()
+        st.rerun()
+    if confirm_col.button(
+        "Удалить",
+        type="primary",
+        use_container_width=True,
+        key="confirm_delete",
+    ):
+        try:
+            storage.delete_file(pending, confirmed=True)
+            _clear_pending_delete()
+            _flash("Файл удалён")
+        except Exception as error:
+            st.error(f"Ошибка удаления: {error}")
+
+
+def _render_delete_confirmation(storage: DriveStorage) -> None:
+    if st.session_state.pending_delete is not None:
+        _render_delete_dialog(storage)
 
 
 def _navigate_to(path: str) -> None:
@@ -260,6 +293,7 @@ def _render_file_actions(
                 st.session_state.download_mime = (
                     mimetypes.guess_type(entry.name)[0] or "application/octet-stream"
                 )
+                st.session_state.download_token = uuid.uuid4().hex
                 st.rerun()
             except Exception as error:
                 st.error(str(error))

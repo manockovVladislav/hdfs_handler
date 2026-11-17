@@ -9,7 +9,6 @@ from enum import Enum
 class EntryKind(str, Enum):
     DIRECTORY = "directory"
     HDFS_FILE = "hdfs_file"
-    ARCHIVE_MEMBER = "archive_member"
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,8 +19,6 @@ class FileEntry:
     modified: str = ""
     owner: str = ""
     path: str | None = None
-    archive: str | None = None
-    member: str | None = None
 
     @property
     def is_directory(self) -> bool:
@@ -29,4 +26,4 @@ class FileEntry:
 
     @property
     def identity(self) -> str:
-        return self.path or f"{self.archive}!{self.member}"
+        return self.path or self.name

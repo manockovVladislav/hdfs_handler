@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import subprocess
 import unittest
+from pathlib import Path
 
 from hdfs_drive.config import AppConfig
 from hdfs_drive.errors import (
@@ -31,6 +33,12 @@ class FakeHdfsClient:
 
     def is_file(self, path: str) -> bool:
         return path in self.file_paths
+
+
+class UploadedBytes(io.BytesIO):
+    def __init__(self, name: str, data: bytes) -> None:
+        super().__init__(data)
+        self.name = name
 
 
 class DeletionSafetyTests(unittest.TestCase):
@@ -77,6 +85,40 @@ class DeletionSafetyTests(unittest.TestCase):
             self.storage.delete_file(entry, confirmed=True)
         self.assertEqual(self.client.commands, [])
 
+
+class UploadTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = FakeHdfsClient()
+        self.storage = HdfsStorage(AppConfig(root=ROOT), self.client)
+
+    def test_files_are_uploaded_individually_without_zip(self) -> None:
+        files = [
+            UploadedBytes("report.csv", b"a,b\n1,2"),
+            UploadedBytes("notes.txt", b"hello"),
+        ]
+
+        added, skipped = self.storage.upload_files(ROOT, files)
+
+        self.assertEqual(added, ["report.csv", "notes.txt"])
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(self.client.commands), 2)
+        for command, name in zip(self.client.commands, added, strict=True):
+            self.assertEqual(command[0], "-put")
+            self.assertEqual(Path(command[1]).name, name)
+            self.assertEqual(command[2], f"{ROOT}/{name}")
+            self.assertNotIn("-f", command)
+            self.assertFalse(any(part.endswith(".zip") for part in command))
+
+    def test_existing_file_is_skipped_instead_of_overwritten(self) -> None:
+        self.client.file_paths.add(f"{ROOT}/report.csv")
+
+        added, skipped = self.storage.upload_files(
+            ROOT, [UploadedBytes("report.csv", b"replacement")]
+        )
+
+        self.assertEqual(added, [])
+        self.assertEqual(skipped, ["report.csv"])
+        self.assertEqual(self.client.commands, [])
 
 
 if __name__ == "__main__":

@@ -1,9 +1,10 @@
-"""Настройка стартового каталога и запуск визуального демо из Jupyter."""
+"""Настройка стартового каталога и запуск Streamlit из Jupyter."""
 
 from __future__ import annotations
 
 import html
 import os
+import posixpath
 import shutil
 import socket
 import subprocess
@@ -14,9 +15,9 @@ from pathlib import Path
 
 from IPython.display import HTML, display
 
-from .config import AppConfig
+from .config import HDFS_BASE_ROOT, AppConfig
 from .storage import HdfsStorage
-from .utils import validate_root_path
+from .utils import validate_name, validate_root_path
 
 
 _PROCESS: subprocess.Popen[str] | None = None
@@ -41,10 +42,11 @@ def _stop_preview() -> None:
 
 
 def configure_root_directory(
-    root_path: str, *, create_if_missing: bool = False
+    folder_name: str, *, create_if_missing: bool = False
 ) -> dict[str, object]:
-    """Задаёт единственный стартовый каталог приложения и проверяет HDFS."""
-    root = validate_root_path(root_path)
+    """Добавляет одну конечную папку к базовому HDFS-пути из конфига."""
+    folder = validate_name(folder_name, object_label="корневой папки")
+    root = validate_root_path(posixpath.join(HDFS_BASE_ROOT, folder))
     os.environ["HDFS_DRIVE_ROOT"] = root
     result: dict[str, object] = {
         "root": root,
@@ -52,11 +54,14 @@ def configure_root_directory(
         "hdfs_status": "не проверялся",
     }
 
-    if shutil.which("hdfs") is None:
-        result["hdfs_status"] = "команда hdfs не найдена; путь применён к демо"
+    config = AppConfig.from_env()
+    if config.test_mode:
+        result["hdfs_status"] = "тестовый режим; HDFS не проверялся"
+    elif shutil.which("hdfs") is None:
+        result["hdfs_status"] = "команда hdfs не найдена"
     else:
         try:
-            storage = HdfsStorage(AppConfig.from_env())
+            storage = HdfsStorage(config)
             if storage.client.exists(root):
                 if not storage.client.is_directory(root):
                     raise RuntimeError("Указанный путь существует, но не является папкой")
@@ -113,8 +118,8 @@ def _wait_until_ready(port: int, timeout: float = 20.0) -> None:
     raise TimeoutError("Streamlit не успел запуститься за 20 секунд")
 
 
-def launch_preview(*, height: int = 760) -> None:
-    """Запускает безопасное демо и показывает его прямо под ячейкой."""
+def launch_preview() -> str:
+    """Запускает Streamlit и показывает только ссылку на интерфейс."""
     global _PROCESS, _LOG_FILE, _PORT
 
     project_root = Path(__file__).resolve().parent.parent
@@ -124,7 +129,6 @@ def launch_preview(*, height: int = 760) -> None:
         log_path = Path("/tmp") / f"hdfs_drive_streamlit_{_PORT}.log"
         _LOG_FILE = log_path.open("w", encoding="utf-8")
         environment = os.environ.copy()
-        environment["HDFS_DRIVE_DEMO"] = "1"
         _PROCESS = subprocess.Popen(
             [
                 sys.executable,
@@ -158,17 +162,19 @@ def launch_preview(*, height: int = 760) -> None:
         if prefix
         else f"http://127.0.0.1:{_PORT}/"
     )
+    mode_label = "тестовом" if AppConfig.from_env().test_mode else "боевом"
     display(
         HTML(
             f"""
-            <div style="font-family:system-ui;margin:8px 0 12px">
-              <b>HDFS Drive запущен в безопасном демо-режиме.</b>
-              <a href="{public_url}" target="_blank" style="margin-left:12px">
-                Открыть в новой вкладке
+            <div style="font-family:system-ui;padding:12px 14px;border:1px solid #dadce0;
+                        border-radius:12px;margin:8px 0 12px">
+              <b>HDFS Drive запущен в {mode_label} режиме.</b>
+              <a href="{html.escape(public_url)}" target="_blank"
+                 rel="noopener noreferrer" style="margin-left:12px">
+                Открыть интерфейс
               </a>
             </div>
-            <iframe src="{public_url}" width="100%" height="{height}"
-              style="border:1px solid #dadce0;border-radius:16px;background:#fff"></iframe>
             """
         )
     )
+    return public_url
